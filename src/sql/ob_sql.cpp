@@ -3514,13 +3514,48 @@ int ObSql::after_get_plan(ObPlanCacheCtx &pc_ctx,
   return ret;
 }
 
+// A file table (read_csv()/read_json()/read_parquet()/glob()) bakes the file
+// path, the inferred column list and the file size into the plan.  The plan
+// cache key only uses the parameterized SQL text, so two statements that differ
+// only in the file path would share one plan and the second one would silently
+// read the first file.  Such statements are therefore never cached.
+static bool item_contains_file_table(const TableItem *item, const int64_t depth);
+
+static bool stmt_contains_file_table(ObDMLStmt *stmt, const int64_t depth)
+{
+  bool found = false;
+  if (NULL != stmt && depth < 8) {
+    const ObIArray<TableItem *> &items = stmt->get_table_items();
+    for (int64_t i = 0; !found && i < items.count(); ++i) {
+      found = item_contains_file_table(items.at(i), depth + 1);
+    }
+  }
+  return found;
+}
+
+static bool item_contains_file_table(const TableItem *item, const int64_t depth)
+{
+  bool found = false;
+  if (NULL == item || depth > 8) {
+    found = false;
+  } else if (item->is_file_table()) {
+    found = true;
+  } else if (item->is_joined_table()) {
+    const JoinedTable *joined = static_cast<const JoinedTable *>(item);
+    found = item_contains_file_table(joined->left_table_, depth + 1) ||
+            item_contains_file_table(joined->right_table_, depth + 1);
+  } else if (item->is_generated_table() && NULL != item->ref_query_) {
+    found = stmt_contains_file_table(item->ref_query_, depth + 1);
+  }
+  return found;
+}
+
 int ObSql::need_add_plan(const ObPlanCacheCtx &pc_ctx,
                          ObResultSet &result,
                          bool is_enable_pc,
                          bool &need_add_plan)
 {
   int ret = OB_SUCCESS;
-  result.get_exec_context().get_stmt_factory()->get_query_ctx();
   if (false == need_add_plan) {
     // do nothing
   } else if (!is_enable_pc || !pc_ctx.should_add_plan_) {
@@ -3530,6 +3565,11 @@ int ObSql::need_add_plan(const ObPlanCacheCtx &pc_ctx,
     ret = OB_ERR_UNEXPECTED;
   } else if (result.get_exec_context().get_stmt_factory()->get_query_ctx()->has_hybrid_search()) {
     need_add_plan = false;
+  } else if (stmt_contains_file_table(
+                 result.get_exec_context().get_stmt_factory()->get_query_ctx()->root_stmt_, 0)) {
+    // see the comment above: the file path is part of the plan, not of the key
+    need_add_plan = false;
+    LOG_TRACE("statement with a file table is not put into the plan cache");
   }
   return ret;
 }
