@@ -1250,8 +1250,8 @@ int pq_snappy_decompress(const char *src, int64_t src_len, std::string &dst)
 
 struct PqColumn {
   PqColumn() : type_(0), name_(), nullable_(0), repetition_(0), data_page_offset_(0), num_values_(0),
-               codec_(0), pq_type_(0), ints_(), doubles_(), dict_ints_(), dict_doubles_(),
-               has_dict_(false) {}
+               codec_(0), pq_type_(0), ints_(), doubles_(), strings_(), dict_ints_(),
+               dict_doubles_(), dict_strings_(), has_dict_(false) {}
   int32_t type_;      // ObObjType
   std::string name_;
   int32_t nullable_;
@@ -1262,10 +1262,30 @@ struct PqColumn {
   int32_t pq_type_;
   std::vector<int64_t> ints_;
   std::vector<double> doubles_;
+  std::vector<std::string> strings_;
   std::vector<int64_t> dict_ints_;
   std::vector<double> dict_doubles_;
+  std::vector<std::string> dict_strings_;
   bool has_dict_;
 };
+
+// PLAIN encoded BYTE_ARRAY: 4-byte little-endian length followed by the bytes
+void pq_plain_strings(const std::string &raw, std::vector<std::string> &out)
+{
+  size_t p = 0;
+  while (p + 4 <= raw.size()) {
+    const int64_t n = static_cast<uint8_t>(raw[p]) |
+        (static_cast<int64_t>(static_cast<uint8_t>(raw[p + 1])) << 8) |
+        (static_cast<int64_t>(static_cast<uint8_t>(raw[p + 2])) << 16) |
+        (static_cast<int64_t>(static_cast<uint8_t>(raw[p + 3])) << 24);
+    p += 4;
+    if (n < 0 || p + static_cast<size_t>(n) > raw.size()) {
+      break;
+    }
+    out.emplace_back(raw.data() + p, static_cast<size_t>(n));
+    p += static_cast<size_t>(n);
+  }
+}
 
 } // namespace
 
@@ -1430,10 +1450,14 @@ int ob_parquet_read(const common::ObString &path,
                   col.nullable_ = (1 == repetition || 2 == repetition) ? 1 : 0;
                   col.repetition_ = repetition;
                   switch (col.pq_type_) {
-                    case 1: col.type_ = ObIntType; break;      // INT32
-                    case 2: col.type_ = ObIntType; break;      // INT64
-                    case 4: col.type_ = ObDoubleType; break;   // DOUBLE
-                    case 5: col.type_ = ObVarcharType; break;  // BYTE_ARRAY
+                    case 0: col.type_ = ObTinyIntType; break;   // BOOLEAN
+                    case 1: col.type_ = ObIntType; break;       // INT32
+                    case 2: col.type_ = ObIntType; break;       // INT64
+                    case 3: col.type_ = ObIntType; break;       // INT96
+                    case 4: col.type_ = ObDoubleType; break;    // FLOAT
+                    case 5: col.type_ = ObDoubleType; break;    // DOUBLE
+                    case 6: col.type_ = ObVarcharType; break;   // BYTE_ARRAY
+                    case 7: col.type_ = ObVarcharType; break;   // FIXED_LEN_BYTE_ARRAY
                     default: col.type_ = ObIntType; break;
                   }
                   columns.push_back(col);
