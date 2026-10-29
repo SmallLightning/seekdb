@@ -4090,14 +4090,20 @@ int ObDMLResolver::resolve_file_table_item(const ParseNode &parse_tree, TableIte
         ret = OB_ERR_UNEXPECTED;
       }
     } else if (ObFileTableDef::FILE_FORMAT_PARQUET == format) {
-      std::vector<std::vector<int64_t>> int_values;
-      std::vector<std::vector<double>> double_values;
-      if (OB_FAIL(ob_parquet_read(def->file_name_, *allocator_, def->column_names_,
-                                  def->column_types_, def->column_nullable_,
-                                  int_values, double_values))) {
+      // only the footer schema is needed here, never decode the values twice
+      std::vector<ObParquetColumn> pq_columns;
+      if (OB_FAIL(ob_parquet_read(def->file_name_, *allocator_, pq_columns, false))) {
         LOG_WARN("read parquet schema failed", K(ret), K(def->file_name_));
-      } else if (0 == def->column_names_.count()) {
+      } else if (pq_columns.empty()) {
         ret = OB_ERR_UNEXPECTED;
+      } else {
+        for (size_t i = 0; OB_SUCC(ret) && i < pq_columns.size(); ++i) {
+          if (OB_FAIL(def->column_names_.push_back(pq_columns[i].name_))) {
+          } else if (OB_FAIL(def->column_types_.push_back(pq_columns[i].type_))) {
+          } else if (OB_FAIL(def->column_nullable_.push_back(
+                     pq_columns[i].nullable_ ? 1 : 0))) {
+          }
+        }
       }
     } else {
       ret = OB_NOT_SUPPORTED;

@@ -141,10 +141,10 @@ private:
   // glob() results, filled once in inner_open
   std::vector<std::string> glob_files_;
   int64_t glob_idx_ = 0;
-  // parquet values, materialised in inner_open
-  std::vector<std::vector<int64_t>> pq_ints_;
-  std::vector<std::vector<double>> pq_doubles_;
+  // parquet columns, materialised in inner_open
+  std::vector<ObParquetColumn> pq_cols_;
   int64_t pq_row_ = 0;
+  int64_t pq_row_count_ = 0;
 };
 
 } // end namespace sql

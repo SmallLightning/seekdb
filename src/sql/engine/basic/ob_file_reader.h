@@ -151,15 +151,28 @@ int ob_csv_scan_nullable(const common::ObString &path,
                          const bool has_header,
                          common::ObIArray<int32_t> &nullable);
 
-// Minimal parquet reader: flat schema, PLAIN encoded INT32/INT64/DOUBLE
-// columns, snappy or no compression, any number of row groups.
+// One decoded parquet column.  The value arrays are all aligned with the row
+// index; a null row keeps a placeholder value and sets is_null_[row] to 1.
+struct ObParquetColumn
+{
+  ObParquetColumn() : name_(), type_(0), nullable_(false), row_count_(0) {}
+  common::ObString name_;
+  int32_t type_;      // ObObjType
+  bool nullable_;
+  int64_t row_count_;
+  std::vector<int64_t> ints_;
+  std::vector<double> doubles_;
+  std::vector<std::string> strings_;
+  std::vector<uint8_t> is_null_;
+};
+
+// Minimal parquet reader: flat schema, any number of row groups, PLAIN and
+// dictionary encoded pages, UNCOMPRESSED and SNAPPY codecs, optional columns.
+// read_values = false only parses the footer and reports the schema.
 int ob_parquet_read(const common::ObString &path,
                     common::ObIAllocator &alloc,
-                    common::ObIArray<common::ObString> &names,
-                    common::ObIArray<int32_t> &types,
-                    common::ObIArray<int32_t> &nullable,
-                    std::vector<std::vector<int64_t>> &int_values,
-                    std::vector<std::vector<double>> &double_values);
+                    std::vector<ObParquetColumn> &columns,
+                    const bool read_values);
 
 // Resolve a path against secure_file_priv.  Both arguments must be canonical
 // absolute paths; an empty priv means "no restriction".
