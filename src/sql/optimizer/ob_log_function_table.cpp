@@ -78,6 +78,8 @@ int ObLogFunctionTable::get_plan_item_info(PlanText &plan_text,
 {
   int ret = OB_SUCCESS;
   if (OB_FAIL(ObLogicalOperator::get_plan_item_info(plan_text, plan_item))) {
+  } else if (is_file_table()) {
+    // the file table has no expression, its columns come from the inferred schema
   } else if (OB_ISNULL(get_value_expr())) {
     ret = OB_ERR_UNEXPECTED;
   } else {
@@ -93,7 +95,7 @@ int ObLogFunctionTable::get_plan_item_info(PlanText &plan_text,
                      name.length(), 
                      plan_item.object_alias_, 
                      plan_item.object_alias_len_);
-    BUF_PRINT_STR("FUNCTION TABLE",
+    BUF_PRINT_STR(is_file_table() ? "FILE TABLE" : "FUNCTION TABLE",
                   plan_item.object_type_,
                   plan_item.object_type_len_);
   }

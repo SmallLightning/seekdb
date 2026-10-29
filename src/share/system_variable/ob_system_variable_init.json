@@ -10975,5 +10975,20 @@
     "info_cn": "",
     "background_cn": "",
     "ref_url": ""
+  },
+  "enable_file_sql": {
+    "id": 10754,
+    "name": "enable_file_sql",
+    "default_value": "0",
+    "base_value": "0",
+    "data_type": "bool",
+    "info": "Whether file SQL (read_csv/read_json/read_parquet/glob) is enabled for this session",
+    "flags": "SESSION",
+    "min_val": "",
+    "max_val": "",
+    "publish_version": "",
+    "info_cn": "是否允许会话使用文件 SQL（read_csv/read_json/read_parquet/glob）",
+    "background_cn": "",
+    "ref_url": ""
   }
 }

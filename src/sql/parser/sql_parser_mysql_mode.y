@@ -499,6 +499,8 @@ END_P SET_VAR DELIMITER
 %type <node> vec_index_params vec_index_param vec_index_param_value opt_with_vector_index_parameters
 %type <node> json_table_expr unnest_expr mock_jt_on_error_on_empty jt_column_list json_table_column_def
 %type <node> json_table_ordinality_column_def json_table_exists_column_def json_table_value_column_def json_table_nested_column_def
+%type <node> file_table_arg_list file_table_arg
+%type <node> copy_stmt opt_copy_options copy_option_list copy_option copy_name copy_value
 %type <node> opt_value_on_empty_or_error_or_mismatch opt_on_mismatch
 %type <node> table_values_clause table_values_clause_with_order_by_and_limit values_row_list row_value
 %type <node> geometry_collection
@@ -582,6 +584,7 @@ stmt:
   | drop_table_stmt         { $$ = $1; check_question_mark($$, result); }
   | drop_view_stmt          { $$ = $1; check_question_mark($$, result); }
   | explain_stmt            { $$ = $1; question_mark_issue($$, result); }
+  | copy_stmt               { $$ = $1; check_question_mark($$, result); }
   | create_outline_stmt     { $$ = $1; question_mark_issue($$, result); }
   | alter_outline_stmt      { $$ = $1; question_mark_issue($$, result); }
   | drop_outline_stmt       { $$ = $1; check_question_mark($$, result); }
@@ -1064,7 +1067,13 @@ complex_string_literal { $$ = $1; }
 | INTNUM { $$ = $1; }
 | APPROXNUM { $$ = $1; }
 | DECIMAL_VAL { $$ = $1; }
-| BOOL_VALUE { $$ = $1; }
+| BOOL_VALUE
+{
+  $$ = $1;
+  /* keep the literal text ("true"/"false"): the lexer node itself has no text,
+   * which makes read_csv(..., header = false) indistinguishable from true */
+  dup_expr_string($$, result, @1.first_column, @1.last_column);
+}
 | NULLX { $$ = $1; }
 | HEX_STRING_VALUE
 {
@@ -10835,6 +10844,14 @@ tbl_name
 {
   $$ = $1;
 }
+| NAME_OB '(' file_table_arg_list ')' relation_name
+{
+  malloc_non_terminal_node($$, result->malloc_pool_, T_FILE_TABLE_EXPRESSION, 3, $1, $3, $5);
+}
+| NAME_OB '(' file_table_arg_list ')'
+{
+  malloc_non_terminal_node($$, result->malloc_pool_, T_FILE_TABLE_EXPRESSION, 3, $1, $3, NULL);
+}
 | '(' table_references ')'
 {
   $$ = $2;
@@ -16651,6 +16668,89 @@ JSON_TABLE '(' simple_expr ',' literal mock_jt_on_error_on_empty COLUMNS '(' jt_
   if (result->pl_parse_info_.is_pl_parse_ && !result->pl_parse_info_.is_pl_parse_expr_) {
     result->pl_parse_info_.is_forbid_pl_fp_ = true;
   }
+}
+;
+
+file_table_arg_list:
+file_table_arg
+{
+  $$ = $1;
+}
+| file_table_arg_list ',' file_table_arg
+{
+  malloc_non_terminal_node($$, result->malloc_pool_, T_LINK_NODE, 2, $1, $3);
+}
+;
+
+file_table_arg:
+literal
+{
+  $$ = $1;
+}
+| NAME_OB COMP_EQ literal
+{
+  malloc_non_terminal_node($$, result->malloc_pool_, T_OP_EQ, 2, $1, $3);
+}
+| NAME_OB COMP_EQ '-' INTNUM
+{
+  $4->value_ = -$4->value_;
+  malloc_non_terminal_node($$, result->malloc_pool_, T_OP_EQ, 2, $1, $4);
+}
+| unreserved_keyword COMP_EQ literal
+{
+  ParseNode *key_node = NULL;
+  get_non_reserved_node(key_node, result->malloc_pool_, @1.first_column, @1.last_column);
+  malloc_non_terminal_node($$, result->malloc_pool_, T_OP_EQ, 2, key_node, $3);
+}
+;
+
+/* COPY (query) TO 'file' [(format csv, header, nullstr 'NULL')] */
+copy_stmt:
+COPY '(' select_no_parens ')' TO complex_string_literal opt_copy_options
+{
+  malloc_non_terminal_node($$, result->malloc_pool_, T_COPY, 3, $3, $6, $7);
+}
+;
+
+opt_copy_options:
+/* empty */ { $$ = NULL; }
+| '(' copy_option_list ')' { $$ = $2; }
+;
+
+copy_option_list:
+copy_option { $$ = $1; }
+| copy_option_list ',' copy_option
+{
+  malloc_non_terminal_node($$, result->malloc_pool_, T_LINK_NODE, 2, $1, $3);
+}
+;
+
+copy_option:
+copy_name
+{
+  $$ = $1;
+}
+| copy_name copy_value
+{
+  malloc_non_terminal_node($$, result->malloc_pool_, T_LINK_NODE, 2, $1, $2);
+}
+;
+
+copy_name:
+NAME_OB { $$ = $1; }
+| unreserved_keyword
+{
+  get_non_reserved_node($$, result->malloc_pool_, @1.first_column, @1.last_column);
+}
+;
+
+copy_value:
+NAME_OB { $$ = $1; }
+| STRING_VALUE { $$ = $1; }
+| INTNUM { $$ = $1; }
+| unreserved_keyword
+{
+  get_non_reserved_node($$, result->malloc_pool_, @1.first_column, @1.last_column);
 }
 ;
 

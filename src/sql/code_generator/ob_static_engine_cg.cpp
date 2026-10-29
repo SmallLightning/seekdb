@@ -5488,6 +5488,23 @@ int ObStaticEngineCG::generate_spec(ObLogSelectInto &op, ObSelectIntoSpec &spec,
       spec.is_overwrite_ = op.get_is_overwrite();
       spec.plan_->need_drive_dml_query_ = true;
     }
+    // COPY ... TO (header): remember the output column names
+    if (OB_SUCC(ret)) {
+      const ObSelectStmt *select_stmt = static_cast<const ObSelectStmt *>(op.get_stmt());
+      const ObSelectIntoItem *into_item = NULL == select_stmt ? NULL : select_stmt->get_select_into();
+      if (NULL != into_item && into_item->has_header_) {
+        if (OB_FAIL(spec.column_names_.init(select_stmt->get_select_item_size()))) {
+        } else {
+          spec.has_header_ = true;
+          for (int64_t i = 0; OB_SUCC(ret) && i < select_stmt->get_select_item_size(); ++i) {
+            ObString name;
+            if (OB_FAIL(ob_write_string(alloc, select_stmt->get_select_item(i).alias_name_, name))) {
+            } else if (OB_FAIL(spec.column_names_.push_back(name))) {
+            }
+          }
+        }
+      }
+    }
   }
   return ret;
 }
@@ -5526,6 +5543,61 @@ int ObStaticEngineCG::generate_spec(ObLogFunctionTable &op, ObFunctionTableSpec 
         OZ (mark_expr_self_produced(col_item->expr_));
         OZ (generate_rt_expr(*col_item->expr_, rt_expr));
         OZ (spec.column_exprs_.push_back(rt_expr));
+      }
+    }
+  }
+  return ret;
+}
+
+int ObStaticEngineCG::generate_spec(ObLogFunctionTable &op, ObFileTableSpec &spec,
+    const bool in_root_job)
+{
+  UNUSED(in_root_job);
+  ObIAllocator &alloc = phy_plan_->get_allocator();
+  const ObFileTableDef *def = op.get_file_table_def();
+  int ret = OB_SUCCESS;
+  if (OB_ISNULL(op.get_stmt()) || OB_ISNULL(def)) {
+    ret = OB_ERR_UNEXPECTED;
+  } else if (OB_UNLIKELY(op.get_num_of_child() > 0)) {
+    ret = OB_ERR_UNEXPECTED;
+  } else if (OB_FAIL(ob_write_string(alloc, def->file_name_, spec.file_name_))) {
+  } else if (OB_FAIL(spec.column_exprs_.init(def->column_names_.count()))) {
+  } else if (OB_FAIL(spec.column_indexes_.init(def->column_names_.count()))) {
+  } else if (OB_FAIL(spec.column_types_.init(def->column_types_.count()))) {
+  } else if (OB_FAIL(spec.column_names_.init(def->column_names_.count()))) {
+  } else {
+    spec.format_ = def->format_;
+    spec.has_header_ = def->has_header_;
+    spec.field_delim_ = def->field_delim_;
+    spec.field_quote_ = def->field_quote_;
+    spec.file_size_ = def->file_size_;
+    spec.file_mtime_ = def->file_mtime_;
+    for (int64_t i = 0; OB_SUCC(ret) && i < def->column_types_.count(); ++i) {
+      if (OB_FAIL(spec.column_types_.push_back(def->column_types_.at(i)))) {
+        LOG_WARN("push column type failed", K(ret));
+      }
+    }
+    for (int64_t i = 0; OB_SUCC(ret) && i < def->column_names_.count(); ++i) {
+      common::ObString name;
+      if (OB_FAIL(ob_write_string(alloc, def->column_names_.at(i), name))) {
+      } else if (OB_FAIL(spec.column_names_.push_back(name))) {
+        LOG_WARN("push column name failed", K(ret));
+      }
+    }
+    for (int64_t i = 0; OB_SUCC(ret) && i < op.get_output_exprs().count(); ++i) {
+      if (OB_FAIL(mark_expr_self_produced(op.get_output_exprs().at(i)))) {
+      }
+    }
+    for (int64_t i = 0; OB_SUCC(ret) && i < def->column_names_.count(); ++i) {
+      ObExpr *rt_expr = NULL;
+      ColumnItem *col_item = const_cast<ObDMLStmt *>(op.get_stmt())->get_column_item(
+          op.get_table_id(), def->column_names_.at(i));
+      if (NULL != col_item && NULL != col_item->expr_ && col_item->expr_->is_explicited_reference()) {
+        if (OB_FAIL(mark_expr_self_produced(col_item->expr_))) {
+        } else if (OB_FAIL(generate_rt_expr(*col_item->expr_, rt_expr))) {
+        } else if (OB_FAIL(spec.column_exprs_.push_back(rt_expr))) {
+        } else if (OB_FAIL(spec.column_indexes_.push_back(static_cast<int32_t>(i)))) {
+        }
       }
     }
   }
@@ -6116,7 +6188,12 @@ int ObStaticEngineCG::get_phy_op_type(ObLogicalOperator &log_op,
       break;
     }
     case log_op_def::LOG_FUNCTION_TABLE: {
-      type = PHY_FUNCTION_TABLE;
+      const ObLogFunctionTable &func_table_op = static_cast<const ObLogFunctionTable&>(log_op);
+      if (func_table_op.is_file_table()) {
+        type = PHY_FILE_TABLE;
+      } else {
+        type = PHY_FUNCTION_TABLE;
+      }
       break;
     }
     case log_op_def::LOG_JSON_TABLE: {

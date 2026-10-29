@@ -8331,6 +8331,9 @@ int ObJoinOrder::init_base_join_order(const TableItem *table_item)
       set_type(FAKE_CTE_TABLE_ACCESS);
     } else if (table_item->is_function_table()) {
       set_type(FUNCTION_TABLE_ACCESS);
+    } else if (table_item->is_file_table()) {
+      // a local file scan shares the function table plan plumbing
+      set_type(FUNCTION_TABLE_ACCESS);
     } else if (table_item->is_json_table()) {
       set_type(JSON_TABLE_ACCESS);
     } else if (table_item->is_values_table()) {
@@ -8506,8 +8509,9 @@ int ObJoinOrder::generate_function_table_paths()
   const TableItem *table_item = NULL;
   if (OB_ISNULL(get_plan()) || OB_ISNULL(stmt = get_plan()->get_stmt()) || OB_ISNULL(allocator_)) {
     ret = OB_INVALID_ARGUMENT;
-  } else if (OB_ISNULL(table_item = stmt->get_table_item_by_id(table_id_)) ||
-             OB_ISNULL(table_item->function_table_expr_)) {
+  } else if (OB_ISNULL(table_item = stmt->get_table_item_by_id(table_id_))) {
+    ret = OB_ERR_UNEXPECTED;
+  } else if (!table_item->is_file_table() && OB_ISNULL(table_item->function_table_expr_)) {
     ret = OB_ERR_UNEXPECTED;
   } else if (OB_ISNULL(func_path = reinterpret_cast<FunctionTablePath*>(
                        allocator_->alloc(sizeof(FunctionTablePath))))) {
@@ -8527,6 +8531,10 @@ int ObJoinOrder::generate_function_table_paths()
                                                                 func_path->subquery_exprs_,
                                                                 func_path->filter_,
                                                                 false /* with_onetime */ ))) {
+    } else if (table_item->is_file_table()) {
+      // a local file scan has no table function expression
+      output_rows_ = 1000;
+      output_row_size_ = 100;
     } else if (OB_ISNULL(function_table_expr = table_item->function_table_expr_)) {
       ret = OB_ERR_UNEXPECTED;
     } else if (OB_FAIL(param_funct_table_expr(function_table_expr,

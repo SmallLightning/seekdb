@@ -128,6 +128,7 @@ struct ObSelectIntoItem
         max_file_size_(DEFAULT_MAX_FILE_SIZE),
         escaped_cht_(),
         buffer_size_(DEFAULT_BUFFER_SIZE),
+        has_header_(false),
         external_properties_()
   {
     field_str_.set_varchar(DEFAULT_FIELD_TERM_STR);
@@ -154,6 +155,7 @@ struct ObSelectIntoItem
     escaped_cht_ = other.escaped_cht_;
     cs_type_ = other.cs_type_;
     buffer_size_ = other.buffer_size_;
+    has_header_ = other.has_header_;
     external_properties_ = other.external_properties_;
     return user_vars_.assign(other.user_vars_);
   }
@@ -185,6 +187,7 @@ struct ObSelectIntoItem
   common::ObObj escaped_cht_;
   common::ObCollationType cs_type_;
   int64_t buffer_size_;
+  bool has_header_; // COPY ... TO (header): write the column names first
   common::ObString external_properties_;
 
   static const char* const DEFAULT_FIELD_TERM_STR;

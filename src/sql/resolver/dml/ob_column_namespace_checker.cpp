@@ -312,7 +312,7 @@ int ObColumnNamespaceChecker::check_column_exists(const TableItem &table_item, c
     if (OB_FAIL(params_.schema_checker_->check_column_exists(
         table_id, col_name, is_exist))) {
     }
-  } else if (table_item.is_function_table()) {
+  } else if (table_item.is_function_table() || table_item.is_file_table()) {
     if (OB_FAIL(ObResolverUtils::check_function_table_column_exist(table_item,
                                                                    params_,
                                                                    col_name))) {

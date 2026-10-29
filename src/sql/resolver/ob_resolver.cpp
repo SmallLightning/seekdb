@@ -16,6 +16,7 @@
 
 #define USING_LOG_PREFIX SQL_RESV
 #include "sql/resolver/ob_resolver.h"
+#include <unistd.h>
 #include "lib/utility/ob_smart_call.h"
 #include "lib/stat/ob_diagnostic_info_guard.h"
 #include "sql/resolver/cmd/ob_alter_system_resolver.h"
@@ -474,6 +475,78 @@ int ObResolver::resolve(IsPrepared if_prepared, const ParseNode &parse_tree, ObS
       }
       case T_EXPLAIN: {
         REGISTER_STMT_RESOLVER(Explain);
+        break;
+      }
+      case T_COPY: {
+        // COPY (query) TO 'file' [(...)]: resolve the query and turn it into
+        // the existing select-into-outfile path
+        ObStmt *copy_child = NULL;
+        ObResolver copy_inner(params_);
+        ObSelectStmt *copy_select = NULL;
+        if (OB_FAIL(copy_inner.resolve(IS_NOT_PREPARED_STMT,
+                                       *real_parse_tree->children_[0], copy_child))) {
+        } else if (OB_ISNULL(copy_child) || stmt::T_SELECT != copy_child->get_stmt_type()) {
+          ret = OB_ERR_UNEXPECTED;
+          LOG_WARN("copy target is not a select stmt", K(ret));
+        } else {
+          copy_select = static_cast<ObSelectStmt *>(copy_child);
+          ParseNode *path_node = real_parse_tree->children_[1];
+          if (OB_ISNULL(path_node) || OB_ISNULL(path_node->str_value_) ||
+              path_node->str_len_ <= 0) {
+            ret = OB_ERR_UNEXPECTED;
+          } else {
+            ObString path(static_cast<int32_t>(path_node->str_len_), path_node->str_value_);
+            std::string std_path(path.ptr(), static_cast<size_t>(path.length()));
+            void *buf = NULL;
+            if (0 == access(std_path.c_str(), F_OK)) {
+              // the target must not exist yet
+              ret = OB_ERR_UNEXPECTED;
+              LOG_WARN("copy target already exists", K(ret), K(path));
+            } else if (OB_ISNULL(buf = params_.allocator_->alloc(sizeof(ObSelectIntoItem)))) {
+              ret = OB_ALLOCATE_MEMORY_FAILED;
+            } else {
+              ObSelectIntoItem *into = new (buf) ObSelectIntoItem();
+              ObString copied;
+              if (OB_FAIL(ob_write_string(*params_.allocator_, path, copied))) {
+              } else {
+                ObObj path_obj;
+                path_obj.set_varchar(copied);
+                path_obj.set_collation_type(CS_TYPE_UTF8MB4_GENERAL_CI);
+                into->into_type_ = T_INTO_OUTFILE;
+                into->outfile_name_ = path_obj;
+                // COPY writes comma separated csv by default
+                into->field_str_.set_varchar(",");
+                into->field_str_.set_collation_type(CS_TYPE_UTF8MB4_GENERAL_CI);
+                into->line_str_.set_varchar("\n");
+                into->line_str_.set_collation_type(CS_TYPE_UTF8MB4_GENERAL_CI);
+                // look for the "header" option
+                ParseNode *opts = real_parse_tree->children_[2];
+                for (ParseNode *cur = opts; OB_SUCC(ret) && NULL != cur; ) {
+                  ParseNode *opt = NULL;
+                  if (T_LINK_NODE == cur->type_) {
+                    opt = cur->children_[1];
+                    cur = cur->children_[0];
+                  } else {
+                    opt = cur;
+                    cur = NULL;
+                  }
+                  if (NULL != opt && T_LINK_NODE == opt->type_) {
+                    // option with a value, e.g. "format csv"
+                    opt = opt->children_[0];
+                  }
+                  if (NULL != opt && NULL != opt->str_value_ && 6 == opt->str_len_ &&
+                      0 == strncasecmp(opt->str_value_, "header", 6)) {
+                    into->has_header_ = true;
+                  }
+                }
+                if (OB_SUCC(ret)) {
+                  copy_select->set_select_into(into);
+                  stmt = copy_select;
+                }
+              }
+            }
+          }
+        }
         break;
       }
       case T_ALTER_SYSTEM_SET: {

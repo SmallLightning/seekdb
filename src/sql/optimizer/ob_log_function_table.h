@@ -22,6 +22,8 @@ namespace oceanbase
 {
 namespace sql
 {
+struct ObFileTableDef;
+
 class ObLogFunctionTable : public ObLogicalOperator
 {
 public:
@@ -29,6 +31,7 @@ public:
       : ObLogicalOperator(plan),
         table_id_(OB_INVALID_ID),
         value_expr_(NULL),
+        file_table_def_(NULL),
         table_name_(),
         access_exprs_() { }
   virtual ~ObLogFunctionTable() {}
@@ -43,6 +46,9 @@ public:
   virtual int allocate_expr_post(ObAllocExprContext &ctx) override;
   void set_table_id(uint64_t table_id) { table_id_ = table_id; }
   uint64_t get_table_id() const { return table_id_; }
+  void set_file_table_def(const ObFileTableDef *def) { file_table_def_ = def; }
+  const ObFileTableDef *get_file_table_def() const { return file_table_def_; }
+  bool is_file_table() const { return NULL != file_table_def_; }
   /**
    *  Get table name
    */
@@ -54,6 +60,7 @@ public:
 private:
   uint64_t table_id_;
   ObRawExpr* value_expr_;
+  const ObFileTableDef *file_table_def_;
   common::ObString table_name_;
   common::ObSEArray<ObRawExpr*, 4, common::ModulePageAllocator, true> access_exprs_;
   DISALLOW_COPY_AND_ASSIGN(ObLogFunctionTable);
